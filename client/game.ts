@@ -2,23 +2,37 @@ type Color = 'red' | 'yellow' | 'blue' | 'green';
 
 const COLORS: Color[] = ['red', 'yellow', 'blue', 'green'];
 
+interface DailyChallengeResponse {
+  date: string;
+  sequence: Color[];
+  todayBest: number;
+  allTimeHigh: number;
+}
+
 interface HighScoreResponse {
   highScore: number;
   isNewRecord?: boolean;
+  todayBest: number;
+  isTodayRecord?: boolean;
 }
 
 class ColorMemoryGame {
+  private dailySequence: Color[] = [];
   private sequence: Color[] = [];
   private playerIndex: number = 0;
   private isPlaying: boolean = false;
   private isShowingSequence: boolean = false;
   private level: number = 0;
   private highScore: number = 0;
+  private todayBest: number = 0;
+  private todayDate: string = '';
 
   private readonly buttons: NodeListOf<HTMLButtonElement>;
   private readonly startBtn: HTMLButtonElement;
   private readonly currentLevelEl: HTMLElement;
   private readonly highScoreEl: HTMLElement;
+  private readonly todayBestEl: HTMLElement;
+  private readonly dateEl: HTMLElement;
   private readonly gameStatusEl: HTMLElement;
 
   private readonly lightOnDuration: number = 600;
@@ -29,6 +43,8 @@ class ColorMemoryGame {
     this.startBtn = document.getElementById('start-btn') as HTMLButtonElement;
     this.currentLevelEl = document.getElementById('current-level') as HTMLElement;
     this.highScoreEl = document.getElementById('high-score') as HTMLElement;
+    this.todayBestEl = document.getElementById('today-best') as HTMLElement;
+    this.dateEl = document.getElementById('challenge-date') as HTMLElement;
     this.gameStatusEl = document.getElementById('game-status') as HTMLElement;
 
     this.init();
@@ -36,7 +52,7 @@ class ColorMemoryGame {
 
   private async init(): Promise<void> {
     this.setupEventListeners();
-    await this.fetchHighScore();
+    await this.fetchDailyChallenge();
   }
 
   private setupEventListeners(): void {
@@ -50,14 +66,21 @@ class ColorMemoryGame {
     });
   }
 
-  private async fetchHighScore(): Promise<void> {
+  private async fetchDailyChallenge(): Promise<void> {
     try {
-      const response = await fetch('/api/highscore');
-      const data = await response.json() as HighScoreResponse;
-      this.highScore = data.highScore;
+      const response = await fetch('/api/daily-challenge');
+      const data = await response.json() as DailyChallengeResponse;
+      this.dailySequence = data.sequence;
+      this.highScore = data.allTimeHigh;
+      this.todayBest = data.todayBest;
+      this.todayDate = data.date;
+
       this.highScoreEl.textContent = this.highScore.toString();
+      this.todayBestEl.textContent = this.todayBest.toString();
+      this.dateEl.textContent = `挑战日期: ${this.todayDate}`;
     } catch (error) {
-      console.error('获取最高分失败:', error);
+      console.error('获取每日挑战失败:', error);
+      this.showStatus('无法连接服务器，请刷新重试', 'gameover');
     }
   }
 
@@ -72,10 +95,16 @@ class ColorMemoryGame {
       });
       const data = await response.json() as HighScoreResponse;
       this.highScore = data.highScore;
+      this.todayBest = data.todayBest;
       this.highScoreEl.textContent = this.highScore.toString();
+      this.todayBestEl.textContent = this.todayBest.toString();
 
-      if (data.isNewRecord) {
-        this.showStatus('🎉 新纪录！', 'success');
+      if (data.isTodayRecord && data.isNewRecord) {
+        this.showStatus('🎉 新纪录！今日最佳 & 历史最佳！', 'success');
+      } else if (data.isTodayRecord) {
+        this.showStatus('🎉 今日新纪录！', 'success');
+      } else if (data.isNewRecord) {
+        this.showStatus('🎉 历史新纪录！', 'success');
       }
     } catch (error) {
       console.error('保存最高分失败:', error);
@@ -83,16 +112,21 @@ class ColorMemoryGame {
   }
 
   private startGame(): void {
+    if (this.dailySequence.length === 0) {
+      this.showStatus('正在加载每日挑战...', 'playing');
+      return;
+    }
+
     this.sequence = [];
     this.playerIndex = 0;
     this.level = 0;
     this.isPlaying = true;
     this.currentLevelEl.textContent = '0';
-    
+
     this.setButtonsDisabled(true);
     this.startBtn.disabled = true;
-    
-    this.showStatus('游戏开始！', 'playing');
+
+    this.showStatus('每日挑战开始！', 'playing');
     this.nextRound();
   }
 
@@ -101,8 +135,12 @@ class ColorMemoryGame {
     this.currentLevelEl.textContent = this.level.toString();
     this.playerIndex = 0;
 
-    const randomColor = COLORS[Math.floor(Math.random() * COLORS.length)];
-    this.sequence.push(randomColor);
+    if (this.level <= this.dailySequence.length) {
+      this.sequence.push(this.dailySequence[this.level - 1]);
+    } else {
+      const randomColor = COLORS[Math.floor(Math.random() * COLORS.length)];
+      this.sequence.push(randomColor);
+    }
 
     this.showStatus(`第 ${this.level} 关 - 记住序列`, 'playing');
     this.showSequence();
@@ -117,7 +155,7 @@ class ColorMemoryGame {
     for (let i = 0; i < this.sequence.length; i++) {
       const color = this.sequence[i];
       await this.lightUpButton(color);
-      
+
       if (i < this.sequence.length - 1) {
         await this.delay(this.lightOffDuration);
       }
@@ -175,10 +213,11 @@ class ColorMemoryGame {
     this.startBtn.disabled = false;
 
     const finalScore = this.level - 1;
-    this.showStatus(`游戏结束！你完成了 ${finalScore} 关`, 'gameover');
 
-    if (finalScore > this.highScore) {
+    if (finalScore > this.todayBest || finalScore > this.highScore) {
       await this.saveHighScore(finalScore);
+    } else {
+      this.showStatus(`游戏结束！你完成了 ${finalScore} 关`, 'gameover');
     }
   }
 

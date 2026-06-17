@@ -1,3 +1,6 @@
 {
-  "highScore": 0
+  "dailyScores": {
+    "2026-06-17": 5
+  },
+  "allTimeHigh": 5
 }
